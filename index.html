@@ -1,0 +1,188 @@
+<html>
+	<head>
+	<!-----------------------------------------------------------------------------
+	<! index.html
+	<! Index of the web page where we are going to render.
+	<! Here we declare the shaders and the canvas.
+	<!
+	<! Author: Fly - Ruben Negredo
+	<! --------------------------------------------------------------------------->
+		<title>Fly WebGL</title>
+		<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+		<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+		<script type="text/javascript" src="webgl-utils.js"></script>
+
+		<!--TROLL SHADER-->
+		<script id="shader-vs" type="x-shader/x-vertex">
+			//ATTRIBUTES
+			attribute vec3 aVertexPosition;
+			attribute vec3 aVertexNormal;
+			attribute vec2 aTextureCoord;
+			
+			//MATRICES
+			uniform mat4 uMVMatrix;
+			uniform mat4 uPMatrix;
+			uniform mat3 uNMatrix;
+
+			varying vec2 vTextureCoord;
+			varying vec4 vPosition;
+			varying vec3 vTransformedNormal;
+			
+			void main(void) 
+			{	
+				//Varying declaration
+				vPosition          = uMVMatrix * vec4(aVertexPosition, 1.0);
+				vTextureCoord      = aTextureCoord;
+				vTransformedNormal = uNMatrix * aVertexNormal;
+				
+				//Set the vertex position
+				gl_Position        = uPMatrix * vPosition;
+			}
+		</script>
+
+		<script id="shader-fs" type="x-shader/x-fragment">
+			precision mediump float;
+
+			varying vec2 vTextureCoord;
+			varying vec3 vTransformedNormal;
+			varying vec4 vPosition;
+			
+			//Light Data
+			uniform vec3  uAmbientColor;
+			uniform vec3  uPointLightingLocation;
+			uniform vec3  uPointLightingSpecularColor;
+			uniform vec3  uPointLightingDiffuseColor;
+			uniform float uPointLightingIntesity;
+			
+			//Textures
+			uniform sampler2D uColorMapSampler;
+			uniform sampler2D uSpecularMapSampler;
+			uniform sampler2D uNormalMapSampler;
+			uniform sampler2D uSkinMapSampler;
+
+			void main(void) 
+			{
+				//Get the distance to light and its direction
+				vec3 rawDistance                = uPointLightingLocation - vPosition.xyz;
+				vec3 lightDirection             = normalize(rawDistance);
+				float distanceToLight           = length   (rawDistance);
+				
+				//Sets the normals based on the texture
+				vec3 normal                     = texture2D(uNormalMapSampler, vec2(vTextureCoord.s, vTextureCoord.t)).rgb;
+				normal.xy                       = (2.0 * normal.xy) - vec2(1.0);
+				normal                          = normalize(normal);
+				
+				//Shininess value based on the specular texture
+				float shininess					= texture2D(uSpecularMapSampler, vec2(vTextureCoord.s, vTextureCoord.t)).r * 255.0;
+				
+				//If the point on this texture is 0, it is the skin, so it has no specular
+				float skinMask                  = texture2D(uSkinMapSampler, vec2(vTextureCoord.s, vTextureCoord.t)).r;
+				float specularLightWeighting    = 0.0;
+				if(skinMask == 0.0)
+				{
+					vec3 eyeDirection				= normalize(vPosition.xyz);
+					vec3 reflectionDirection        = reflect(lightDirection, normal);
+					specularLightWeighting          = pow(max(dot(reflectionDirection, eyeDirection), 0.0), shininess );
+				}
+				
+				//We mix here all the lights values for this fragment
+				float directionalLightWeighting = max(dot(normal, lightDirection), 0.0);
+				vec3 vLightWeighting            = (uAmbientColor + 
+				                                  uPointLightingSpecularColor * specularLightWeighting + 
+												  uPointLightingDiffuseColor  * directionalLightWeighting) * uPointLightingIntesity / (distanceToLight);
+				
+				//Add the diffuse texture and apply the light previously calculated
+				vec4 textureColor = texture2D(uColorMapSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+				gl_FragColor      = vec4     (textureColor.rgb * vLightWeighting, textureColor.a);
+			}
+		</script>
+
+		<!--BALL SHADER-->
+		<script id="ball-shader-vs" type="x-shader/x-vertex">
+			//ATTRIBUTES
+			attribute vec3  aVertexPosition;
+			attribute vec3  aVertexNormal;
+			attribute vec2  aTextureCoord;
+			attribute float aRandomOffset; //The offset of the vertex while moving
+			
+			//MATRICES
+			uniform mat4 uMVMatrix;
+			uniform mat4 uPMatrix;
+			uniform mat3 uNMatrix;
+			
+			//Time from 0 to 1 to interpolate from one position to another
+			uniform float uTime;
+			
+			varying vec2 vTextureCoord;
+			varying vec4 vPosition;
+			
+			varying vec3 vTransformedNormal;
+			
+			void main(void) 
+			{	
+				//interpolates the position based on uTime
+				vec4 modifier = vec4(
+					mix(aVertexPosition.x - aVertexNormal.x * aRandomOffset, aVertexPosition.x + aVertexNormal.x * aRandomOffset, uTime),
+					mix(aVertexPosition.y - aVertexNormal.y * aRandomOffset, aVertexPosition.y + aVertexNormal.y * aRandomOffset, uTime),
+					mix(aVertexPosition.z - aVertexNormal.z * aRandomOffset, aVertexPosition.z + aVertexNormal.z * aRandomOffset, uTime),
+					1.0
+				);
+				
+				vTextureCoord      = aTextureCoord;
+				vTransformedNormal = uNMatrix * aVertexNormal;
+				
+				vPosition          = uMVMatrix * modifier;
+				gl_Position        = uPMatrix * vPosition;
+			}
+		</script>
+		<script id="ball-shader-fs" type="x-shader/x-fragment">
+			precision mediump float;
+
+			varying vec2 vTextureCoord;
+			varying vec3 vTransformedNormal;
+			varying vec4 vPosition;
+			
+			//Light data
+			uniform vec3  uAmbientColor;
+			uniform vec3  uPointLightingLocation;
+			uniform vec3  uPointLightingSpecularColor;
+			uniform vec3  uPointLightingDiffuseColor;
+			uniform float uPointLightingIntesity;
+			
+			//Texture
+			uniform sampler2D uColorMapSampler;
+
+			void main(void) 
+			{
+				vec3 rawDistance                = uPointLightingLocation - vPosition.xyz;
+				float distanceToLight           = length   (rawDistance);
+				vec3 lightDirection             = normalize(rawDistance);
+				
+				vec3 normal                     = normalize(vTransformedNormal);
+				
+				//Apply light effects
+				float directionalLightWeighting = max(dot(normal, lightDirection), 0.0);
+				vec3 vLightWeighting            = (uAmbientColor + 
+												  uPointLightingDiffuseColor  * directionalLightWeighting) * uPointLightingIntesity / distanceToLight;
+				
+				//Mix the texture with the lighting
+				vec4 textureColor  = texture2D(uColorMapSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+				gl_FragColor      = vec4(textureColor.rgb * vLightWeighting, textureColor.a);
+				
+				
+			}
+		</script>
+
+		
+		<script type="text/javascript" src="obj-loader/webgl-obj-loader.js"></script>
+		<script type="text/javascript" src="troll.js"                      ></script>
+		<script type="text/javascript" src="ball.js"                       ></script>
+		<script type="text/javascript" src="main.js"                       ></script>
+	</head>
+
+	<body onLoad="webGLStart();" style="margin:0px;">
+		<canvas id="mycanvas" style="border: none; margin:0px;" width="500" height="500"></canvas>
+	</body>
+
+</html>
